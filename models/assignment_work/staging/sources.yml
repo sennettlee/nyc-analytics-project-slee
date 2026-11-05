@@ -12,7 +12,7 @@ sources:
 
 
           version: 2
-sources:
+
   - name: raw
     description: Raw data loaded from NYC Open Data
     database: sennettlee-cis9440-baruch
