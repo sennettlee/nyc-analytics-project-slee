@@ -1,4 +1,3 @@
-
  -- Quick test to verify source connection works
  SELECT
      unique_key,
