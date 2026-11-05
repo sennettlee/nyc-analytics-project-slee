@@ -1,6 +1,7 @@
 -- Date dimension shared by DOT 311 service requests and DOB NOW job filings
 
 -- Build initial CTEs for Jinja syntax to make refs to staging models easier
+
 WITH stg_311 AS (
     SELECT * FROM {{ ref('stg_nyc_311_dot') }}
 ),
