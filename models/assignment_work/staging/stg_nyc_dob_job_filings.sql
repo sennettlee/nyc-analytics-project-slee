@@ -1,5 +1,5 @@
--- Clean and standardize DOB job application filings
--- Grain: one row per job number + document number
+-- Clean and standardize DOB NOW job application filings
+-- Grain: one row per job filing number
 
 WITH source AS (
     SELECT * FROM {{ source('raw', 'source_nyc_dob_job_apps') }}
@@ -8,31 +8,38 @@ WITH source AS (
 cleaned AS (
     SELECT
         * EXCEPT (
-            job__, doc__, bin__, house__, pre__filing_date, latest_action_date,
-            job_status, job_status_descrp, job_type, building_type, job_description,
-            initial_cost, borough, street_name, block, lot, zip,
-            gis_latitude, gis_longitude
+            job_filing_number, filing_status, current_status_date,
+            house_no, bin, bbl, nta, commmunity_board, postcode,
+            initial_cost, borough, apt_condo_no_s, owner_s_business_name,
+            applicant_professional_title, proposed_no_of_stories,
+            existing_stories, total_construction_floor_area, job_type
         ),
 
-        -- Renamed identifiers
-        CAST(job__ AS STRING) AS job_number,
-        CAST(doc__ AS STRING) AS document_number,
-        CAST(bin__ AS STRING) AS building_identification_number,
+        -- Identifiers
+        CAST(job_filing_number AS STRING) AS job_filing_number,
+        CAST(bin AS STRING) AS building_identification_number,
+        CAST(bbl AS STRING) AS borough_block_lot,
 
-        -- Renamed job details
-        UPPER(TRIM(CAST(job_type AS STRING))) AS job_type,
-        UPPER(TRIM(CAST(job_status AS STRING))) AS job_status_code,
-        CAST(job_status_descrp AS STRING) AS job_status_description,
-        CAST(building_type AS STRING) AS building_type,
-        CAST(job_description AS STRING) AS job_description,
+        -- Job details
+        UPPER(TRIM(job_type)) AS job_type,
+        UPPER(TRIM(filing_status)) AS filing_status,
+        current_status_date AS status_date,
 
-        -- Renamed dates (stored as MM/DD/YYYY strings in the legacy dataset)
-        SAFE.PARSE_DATE('%m/%d/%Y', CAST(pre__filing_date AS STRING)) AS filing_date,
-        SAFE.PARSE_DATE('%m/%d/%Y', CAST(latest_action_date AS STRING)) AS latest_action_date,
+        -- Cost: strip "$" and commas
+        SAFE_CAST(REGEXP_REPLACE(initial_cost, r'[$,]', '') AS NUMERIC) AS initial_cost_usd,
+        SAFE_CAST(total_construction_floor_area AS FLOAT64) AS total_floor_area_sqft,
+        SAFE_CAST(existing_stories AS INT64) AS existing_stories,
+        SAFE_CAST(proposed_no_of_stories AS INT64) AS proposed_stories,
 
-        SAFE_CAST(REGEXP_REPLACE(CAST(initial_cost AS STRING), r'[$,]', '') AS NUMERIC) AS initial_cost,
+        -- Renamed to clearer names (fixes the "commmunity" typo too)
+        house_no AS house_number,
+        apt_condo_no_s AS apartment_condo_numbers,
+        nta AS neighborhood_tabulation_area,
+        commmunity_board AS community_board,
+        owner_s_business_name AS owner_business_name,
+        applicant_professional_title AS applicant_title,
 
-        -- Location
+        -- Borough
         CASE
             WHEN UPPER(TRIM(borough)) IN ('MANHATTAN', 'NEW YORK COUNTY') THEN 'Manhattan'
             WHEN UPPER(TRIM(borough)) IN ('BRONX', 'THE BRONX') THEN 'Bronx'
@@ -41,47 +48,29 @@ cleaned AS (
             WHEN UPPER(TRIM(borough)) IN ('STATEN ISLAND', 'RICHMOND COUNTY') THEN 'Staten Island'
             ELSE 'UNKNOWN'
         END AS borough,
-        CAST(house__ AS STRING) AS house_number,
-        CAST(street_name AS STRING) AS street_name,
-        CAST(block AS STRING) AS tax_block,
-        CAST(lot AS STRING) AS tax_lot,
-        SAFE_CAST(gis_latitude AS FLOAT64) AS latitude,
-        SAFE_CAST(gis_longitude AS FLOAT64) AS longitude,
 
-        -- Zip code cleaning: keep only a valid 5-digit zip, otherwise NULL
+        -- Zip code (property zip is `postcode`)
         CASE
-            WHEN UPPER(TRIM(CAST(zip AS STRING))) IN ('', 'N/A', 'NA', 'NONE', 'ANONYMOUS') THEN NULL
-            WHEN REGEXP_CONTAINS(TRIM(CAST(zip AS STRING)), r'^\d{5}$')
-                THEN TRIM(CAST(zip AS STRING))
-            -- ZIP+4 with or without hyphen (12345-6789 or 123456789): keep first 5
-            WHEN REGEXP_CONTAINS(TRIM(CAST(zip AS STRING)), r'^\d{5}-?\d{4}$')
-                THEN SUBSTR(TRIM(CAST(zip AS STRING)), 1, 5)
-            ELSE NULL  -- wrong length, letters, or junk like 00000 (filtered below)
-        END AS zip_code_raw,
+            WHEN UPPER(TRIM(postcode)) IN ('', 'N/A', 'NA', 'NONE', 'ANONYMOUS') THEN NULL
+            WHEN TRIM(postcode) = '00000' THEN NULL
+            WHEN REGEXP_CONTAINS(TRIM(postcode), r'^\d{5}$') THEN TRIM(postcode)
+            WHEN REGEXP_CONTAINS(TRIM(postcode), r'^\d{5}-?\d{4}$') THEN SUBSTR(TRIM(postcode), 1, 5)
+            ELSE NULL
+        END AS zip_code,
 
         CURRENT_TIMESTAMP() AS _stg_loaded_at
 
     FROM source
 
-    -- Only drop rows missing the essentials (keeps most of the data)
-    WHERE job__ IS NOT NULL
-      AND doc__ IS NOT NULL
-      AND SAFE.PARSE_DATE('%m/%d/%Y', CAST(pre__filing_date AS STRING)) IS NOT NULL
+    -- Only drop rows missing the essentials
+    WHERE job_filing_number IS NOT NULL
+      AND filing_date IS NOT NULL
 
-    -- Deduplicate: keep the most recently updated row per job + document
+    -- Deduplicate: keep the most recently updated row per job filing
     QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY job__, doc__
-        ORDER BY SAFE.PARSE_DATE('%m/%d/%Y', CAST(latest_action_date AS STRING)) DESC NULLS LAST
+        PARTITION BY job_filing_number
+        ORDER BY current_status_date DESC NULLS LAST, filing_date DESC
     ) = 1
-),
-
-final AS (
-    SELECT
-        * EXCEPT (zip_code_raw),
-        -- Placeholder zeros are not real zip codes
-        IF(zip_code_raw = '00000', NULL, zip_code_raw) AS zip_code
-    FROM cleaned
 )
 
-SELECT * FROM final
--- All should be part of this table after running: stg_nyc_dob_job_filings
+SELECT * FROM cleaned
