@@ -5,7 +5,7 @@ WITH stg_dob AS (
     SELECT * FROM {{ ref('stg_nyc_dob_job_filings') }}
 ),
 
-distinct_filing_rereps AS (
+distinct_filing_reps AS (
 
     SELECT DISTINCT
         filing_representative_first_name    AS first_name,
