@@ -41,3 +41,25 @@ location_dimension AS (
         ]) }} AS location_key,
 
         borough,
+        council_district,
+        zip
+
+    FROM all_locations
+
+),
+
+-- Null placeholder row to handle NULL values.
+
+null_placeholder AS (
+
+    SELECT
+        '-1' AS location_key,
+        CAST(NULL AS STRING) AS borough,
+        CAST(NULL AS STRING) AS council_district,
+        CAST(NULL AS STRING) AS zip
+
+)
+
+SELECT location_key, borough, council_district, zip FROM location_dimension
+UNION ALL
+SELECT location_key, borough, council_district, zip FROM null_placeholder
