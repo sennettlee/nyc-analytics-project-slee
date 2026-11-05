@@ -18,7 +18,7 @@ clean-targets:
 
 # Set up models, which are basically SQL files, to create tables
 models:
- nyc_analytics-project-slee:
+ nyc_analytics:
    +materialized: table
 
    assignment_work:
